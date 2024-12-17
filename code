@@ -1,0 +1,279 @@
+import telebot
+import random
+from telebot import types
+
+# Токен бота
+BOT_TOKEN = '7839322062:AAHP2t_01KEBzNhB2EwAsLgB3wc3RqJdEms'
+bot = telebot.TeleBot(BOT_TOKEN)
+
+# Определение словаря слов
+word_data = {
+    "быть": {
+        "Английский": ["be", "exist"],
+        "Французский": ["être", "exister"],
+        "Немецкий": ["sein", "existieren"],
+    },
+    "существовать": {
+        "Английский": ["be", "exist"],
+        "Французский": ["être", "exister"],
+        "Немецкий": ["sein", "existieren"],
+    },
+    "иметь": {
+        "Английский": ["have"],
+        "Французский": ["avoir"],
+        "Немецкий": ["haben"],
+    },
+    "идти": {
+        "Английский": ["go"],
+        "Французский": ["aller"],
+        "Немецкий": ["gehen"],
+    },
+    "объяснять": {
+        "Английский": ["explain"],
+        "Французский": ["expliquer"],
+        "Немецкий": ["erklären"],
+    },
+    "прояснять": {
+        "Английский": ["clarify"],
+        "Французский": ["clarifier"],
+        "Немецкий": ["klären"],
+    },
+}
+
+# Глобальная переменная для хранения прогресса
+user_progress = {}
+
+# Форматирование языка для вопроса
+LANGUAGE_FORMS = {
+    "Английский": "английского",
+    "Французский": "французского",
+    "Немецкий": "немецкого",
+}
+
+def format_language(lang):
+    return LANGUAGE_FORMS.get(lang, lang.lower())
+
+# Главное меню
+def create_keyboard():
+    return types.ReplyKeyboardMarkup(resize_keyboard=True).add(
+        "Начать изучение", "Добавить слово", "Удалить слово", "Показать словарь"
+    )
+
+main_menu = create_keyboard()
+
+# Стартовая команда
+@bot.message_handler(commands=['start'])
+def start_message(message):
+    bot.send_message(
+        message.chat.id,
+        "Привет! Я помогу изучать языки! Выберите действие:",
+        reply_markup=main_menu
+    )
+
+# Подсчет слов
+@bot.message_handler(func=lambda msg: msg.text == "Начать изучение")
+def start_study(message):
+    total_words = len(word_data)
+    bot.send_message(
+        message.chat.id,
+        f"Сколько слов хотите изучить? (от 1 до {total_words})",
+    )
+    bot.register_next_step_handler(message, ask_word_count)
+
+# Обработка количества слов
+def ask_word_count(message):
+    try:
+        word_count = int(message.text.strip())
+        if word_count < 1 or word_count > len(word_data):
+            raise ValueError
+        user_progress[message.from_user.id] = {
+            "word_count": word_count,
+            "questions": [],
+            "correct": 0,
+            "wrong": 0,
+        }
+        send_next_question(message)
+    except ValueError:
+        bot.send_message(
+            message.chat.id,
+            "Введите число от 1 до количества доступных слов."
+        )
+        bot.register_next_step_handler(message, ask_word_count)
+
+# Генерация следующего вопроса
+def send_next_question(message):
+    user_id = message.from_user.id
+    progress = user_progress.get(user_id, {})
+    available_words = list(word_data.keys())
+    asked_words = progress.get("questions", [])
+
+    remaining_words = [word for word in available_words if word not in asked_words]
+
+    if not remaining_words or len(asked_words) >= progress["word_count"]:
+        show_results(message)
+        return
+
+    word = random.choice(remaining_words)
+    progress["questions"].append(word)
+
+    foreign_language = random.choice(list(word_data[word].keys()))
+    foreign_word = random.choice(word_data[word][foreign_language])
+
+    bot.send_message(
+        message.chat.id,
+        f"Как переводится с {format_language(foreign_language)} \"{foreign_word}\"?"
+    )
+    bot.register_next_step_handler(message, check_answer, word, foreign_word)
+
+# Проверка ответа
+def check_answer(message, word, correct_word):
+    user_id = message.from_user.id
+    progress = user_progress[user_id]
+    user_answer = message.text.strip().lower()
+
+    correct_answers = [k for k, v in word_data.items() if correct_word in sum(v.values(), [])]
+
+    if user_answer in [ans.lower() for ans in correct_answers]:
+        progress["correct"] += 1
+        bot.send_message(message.chat.id, "Правильно!")
+    else:
+        progress["wrong"] += 1
+        bot.send_message(
+            message.chat.id,
+            f"Неправильно. Верный ответ: {', '.join(correct_answers)}"
+        )
+    send_next_question(message)
+
+# Вывод результатов
+def show_results(message):
+    user_id = message.from_user.id
+    progress = user_progress[user_id]
+    bot.send_message(
+        message.chat.id,
+        f"Результаты:\nПравильных ответов: {progress['correct']}\n"
+        f"Неправильных ответов: {progress['wrong']}",
+        reply_markup=main_menu
+    )
+
+# Добавление слова
+@bot.message_handler(func=lambda msg: msg.text == "Добавить слово")
+def add_word(message):
+    bot.send_message(
+        message.chat.id,
+        "Введите слово на русском, которое вы хотите добавить (например, 'плавать'):",
+    )
+    bot.register_next_step_handler(message, ask_translations)
+
+# Запрос переводов слова
+def ask_translations(message):
+    word = message.text.strip()
+    if not word:
+        bot.send_message(
+            message.chat.id,
+            "Слово не распознано. Попробуйте снова.",
+            reply_markup=main_menu
+        )
+        return
+
+    bot.send_message(
+        message.chat.id,
+        f"Введите переводы слова \"{word}\" по очереди. Пример ввода:\n\n"
+        "Английский: swim\nФранцузский: nager\nНемецкий: schwimmen\n\n"
+        "Введите 'готово', когда завершите добавление переводов."
+    )
+    user_progress[message.from_user.id] = {"word": word, "translations": {}}
+    bot.register_next_step_handler(message, collect_translations)
+
+# Сбор переводов
+def collect_translations(message):
+    user_id = message.from_user.id
+    progress = user_progress.get(user_id)
+
+    if not progress:
+        bot.send_message(
+            message.chat.id,
+            "Что-то пошло не так. Попробуйте снова.",
+            reply_markup=main_menu
+        )
+        return
+
+    word = progress["word"]
+
+    if message.text.lower().strip() == "готово":
+        if progress["translations"]:
+            word_data[word] = progress["translations"]
+            bot.send_message(
+                message.chat.id,
+                f"Слово \"{word}\" успешно добавлено в словарь!",
+                reply_markup=main_menu
+            )
+        else:
+            bot.send_message(
+                message.chat.id,
+                "Вы не добавили ни одного перевода. Слово не сохранено.",
+                reply_markup=main_menu
+            )
+        user_progress.pop(user_id, None)
+        return
+
+    try:
+        lang, translation = map(str.strip, message.text.split(":"))
+        if lang in ["Английский", "Французский", "Немецкий"]:
+            progress["translations"].setdefault(lang, []).append(translation)
+            bot.send_message(
+                message.chat.id,
+                f"Перевод \"{translation}\" добавлен для языка \"{lang}\".\n"
+                f"Введите следующий перевод или напишите 'готово' для завершения."
+            )
+        else:
+            bot.send_message(
+                message.chat.id,
+                "Неизвестный язык. Используйте только Английский, Французский или Немецкий."
+            )
+    except ValueError:
+        bot.send_message(
+            message.chat.id,
+            "Ошибка ввода. Используйте формат: Язык: перевод (например, 'Английский: swim')."
+        )
+
+    bot.register_next_step_handler(message, collect_translations)
+
+# Удаление слова
+@bot.message_handler(func=lambda msg: msg.text == "Удалить слово")
+def delete_word(message):
+    bot.send_message(
+        message.chat.id,
+        "Введите слово для удаления:"
+    )
+    bot.register_next_step_handler(message, confirm_delete_word)
+
+def confirm_delete_word(message):
+    word = message.text.strip()
+    if word in word_data:
+        del word_data[word]
+        bot.send_message(
+            message.chat.id,
+            f"Слово '{word}' удалено.",
+            reply_markup=main_menu
+        )
+    else:
+        bot.send_message(
+            message.chat.id,
+            f"Слово '{word}' не найдено в словаре.",
+            reply_markup=main_menu
+        )
+
+# Показ словаря
+@bot.message_handler(func=lambda msg: msg.text == "Показать словарь")
+def show_dictionary(message):
+    if word_data:
+        dictionary = "\n".join([
+            f"🔸 {word}:\n" + "\n".join([f"   {lang}: {', '.join(tr)}" for lang, tr in translations.items()])
+            for word, translations in word_data.items()
+        ])
+        bot.send_message(message.chat.id, f"📚 Словарь:\n{dictionary}")
+    else:
+        bot.send_message(message.chat.id, "Словарь пуст.", reply_markup=main_menu)
+
+# Запуск бота
+bot.infinity_polling()
